@@ -111,3 +111,32 @@ class SyncCursor(Base):
     objectType: Mapped[str] = mapped_column(String, primary_key=True)
     lastSystemModstamp: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updatedAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcNow)
+
+
+class User(Base):
+    """A portal user (finance / customer-success). Password is stored as a pbkdf2 'salt$hash'.
+
+    The reason this exists: the actor on a portal edit must be a real, authenticated identity, not
+    a client-supplied string — so edits can be attributed defensibly (see docs/DECISIONS.md).
+    """
+
+    __tablename__ = "users"
+
+    email: Mapped[str] = mapped_column(String, primary_key=True)
+    passwordHash: Mapped[str] = mapped_column(String)
+    createdAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcNow)
+
+
+class AuthSession(Base):
+    """An authenticated portal session: an opaque bearer token mapped to a user email.
+
+    Stored in the database (not in memory) so sessions survive a restart and are visible across the
+    worker and request threads. The edit endpoint derives the acting user from this, never from the
+    request body.
+    """
+
+    __tablename__ = "sessions"
+
+    token: Mapped[str] = mapped_column(String, primary_key=True)
+    email: Mapped[str] = mapped_column(String, index=True)
+    createdAt: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcNow)
