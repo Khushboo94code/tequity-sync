@@ -21,7 +21,9 @@ def makeEngine(databaseUrl: str | None = None):
     while FastAPI serves requests on others.
     """
     url = databaseUrl or config.databaseUrl
-    connectArgs = {"check_same_thread": False} if url.startswith("sqlite") else {}
+    # SQLite: allow cross-thread use (worker thread + request threads) and wait on locks
+    # instead of failing immediately, since several threads write the same file in the demo.
+    connectArgs = {"check_same_thread": False, "timeout": 30} if url.startswith("sqlite") else {}
     return create_engine(url, connect_args=connectArgs, future=True)
 
 
