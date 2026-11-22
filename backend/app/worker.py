@@ -73,7 +73,13 @@ def processRow(session, crm, bucket: TokenBucket, row: Outbox) -> str:
     """
     bucket.acquire()  # the cap applies to this call, including retries
     try:
-        crm.upsertRecord(row.recordId, row.objectType, row.fieldName, row.newValue, row.actor)
+        # We authenticate to Salesforce as the integration user, so the write (and the webhook
+        # Salesforce echoes for it) is attributed to that identity — which is what the inbound
+        # loop rule and the backfill own-write skip key on. row.actor (the portal editor) is
+        # already recorded in our history; Salesforce only ever sees the integration user.
+        crm.upsertRecord(
+            row.recordId, row.objectType, row.fieldName, row.newValue, config.integrationUser
+        )
     except TransientError as exc:
         row.attempts += 1
         if row.attempts >= MAX_ATTEMPTS:
