@@ -1,22 +1,71 @@
 import React, { useCallback, useEffect, useState } from 'react'
-import { control, getHistory, getMetrics, getRecord, portalEdit, sendWebhook } from './api.js'
+import * as api from './api.js'
 
-// The contact fields this exercise cares about (DESIGN.md section: records).
+// The contact fields this exercise cares about.
 const CONTACT_FIELDS = ['fullName', 'phone', 'email', 'city', 'owner']
-const PORTAL_ACTOR = 'finance.user@client.example'
 const SALES_ACTOR = 'sales.user@client.example'
 
-// A monotonic-ish event id for cockpit webhooks, so duplicates can be sent on purpose.
+// A monotonic event id for cockpit webhooks, so duplicates can be sent on purpose.
 let eventSeq = 1
 const nextEventId = () => `ui_evt_${eventSeq++}`
 const nowIso = () => new Date().toISOString()
+
+// ---------------------------------------------------------------------------- auth screen
+
+function AuthScreen({ onAuthed }) {
+  const [mode, setMode] = useState('login')
+  const [email, setEmail] = useState('finance@client.example')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+
+  const submit = async (e) => {
+    e.preventDefault()
+    setError('')
+    const res = await (mode === 'login' ? api.login(email, password) : api.signup(email, password))
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      setError(body.detail || `${mode} failed`)
+      return
+    }
+    const data = await res.json()
+    api.setToken(data.token)
+    onAuthed(data.email)
+  }
+
+  return (
+    <div className="authwrap">
+      <form className="card authcard" onSubmit={submit}>
+        <h1>Tequity portal</h1>
+        <p className="muted">
+          {mode === 'login' ? 'Log in' : 'Create an account'} — your edits are attributed to you
+          (the actor comes from your authenticated session, server-side).
+        </p>
+        <label className="row"><span>email</span>
+          <input value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="username" />
+        </label>
+        <label className="row"><span>password</span>
+          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+            autoComplete="current-password" />
+        </label>
+        {error && <p className="err">{error}</p>}
+        <button className="primary" type="submit">{mode === 'login' ? 'Log in' : 'Sign up'}</button>
+        <button type="button" className="link"
+          onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setError('') }}>
+          {mode === 'login' ? 'Need an account? Sign up' : 'Have an account? Log in'}
+        </button>
+      </form>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------- pieces
 
 function CurrentState({ record }) {
   const fields = record?.fields || {}
   const names = Object.keys(fields)
   return (
     <div className="card">
-      <h2>Current record — {record?.recordId}</h2>
+      <h2>Current record — {record?.recordId || '—'}</h2>
       {names.length === 0 ? (
         <p className="muted">No fields yet. Edit below, or simulate a Salesforce change.</p>
       ) : (
@@ -63,81 +112,99 @@ function History({ history }) {
   )
 }
 
-export default function App() {
-  const [recordId, setRecordId] = useState('0031')
+// ---------------------------------------------------------------------------- portal
+
+function Portal({ email, onLogout }) {
+  const [records, setRecords] = useState([])
+  const [recordId, setRecordId] = useState(null)
   const [record, setRecord] = useState(null)
   const [history, setHistory] = useState([])
   const [metrics, setMetrics] = useState({})
   const [draft, setDraft] = useState({})
   const [log, setLog] = useState([])
 
-  const note = (msg) => setLog((prev) => [`${new Date().toLocaleTimeString()}  ${msg}`, ...prev].slice(0, 12))
+  const note = (m) => setLog((p) => [`${new Date().toLocaleTimeString()}  ${m}`, ...p].slice(0, 12))
 
-  const refresh = useCallback(async () => {
-    const [rec, hist, met] = await Promise.all([
-      getRecord(recordId), getHistory(recordId), getMetrics(),
-    ])
+  const refreshList = useCallback(async () => {
+    const data = await api.listRecords()
+    const list = data.records || []
+    setRecords(list)
+    setRecordId((prev) => prev || (list[0] && list[0].recordId) || null)
+  }, [])
+
+  const refreshSelected = useCallback(async () => {
+    if (!recordId) { setRecord(null); setHistory([]); return }
+    const [rec, hist] = await Promise.all([api.getRecord(recordId), api.getHistory(recordId)])
     setRecord(rec)
     setHistory(hist.history || [])
-    setMetrics(met)
   }, [recordId])
 
-  useEffect(() => { refresh() }, [refresh])
-  // Light polling so the worker's background drain and inbound webhooks show up live.
-  useEffect(() => {
-    const t = setInterval(refresh, 1500)
-    return () => clearInterval(t)
-  }, [refresh])
+  const refreshMetrics = useCallback(async () => setMetrics(await api.getMetrics()), [])
 
-  const saveDraft = async () => {
-    const changed = Object.fromEntries(Object.entries(draft).filter(([, v]) => v !== ''))
+  useEffect(() => { refreshList() }, [refreshList])
+  useEffect(() => { refreshSelected() }, [refreshSelected])
+  useEffect(() => {
+    const t = setInterval(() => { refreshSelected(); refreshMetrics(); refreshList() }, 1500)
+    return () => clearInterval(t)
+  }, [refreshSelected, refreshMetrics, refreshList])
+
+  const save = async () => {
+    const changed = Object.fromEntries(
+      Object.entries(draft).filter(([k, v]) => !k.startsWith('__') && v !== '')
+    )
+    if (!recordId) return note('select a record first')
     if (Object.keys(changed).length === 0) return note('nothing to save')
-    const res = await portalEdit(recordId, changed, PORTAL_ACTOR)
-    note(`portal save: applied=${JSON.stringify(res.appliedFields)} enqueued=${res.enqueuedOutboxIds?.length ?? 0}`)
+    const res = await api.portalEdit(recordId, changed)
+    note(`saved ${JSON.stringify(res.appliedFields)} as ${email}; enqueued ${res.enqueuedOutboxIds?.length ?? 0}`)
     setDraft({})
-    refresh()
+    refreshSelected()
+    refreshList()
   }
 
   const salesEdit = async (deliver) => {
+    if (!recordId) return note('select a record first')
     const field = draft.__sfField || 'phone'
     const value = draft.__sfValue || `+91${Math.floor(Math.random() * 10000)}`
-    await control('salesEdit', { recordId, fieldName: field, value, changedBy: SALES_ACTOR, deliver })
-    note(`salesforce edit ${field}=${value} (${deliver ? 'webhook delivered' : 'webhook DROPPED'})`)
-    refresh()
+    const changedBy = draft.__sfChangedBy || SALES_ACTOR
+    await api.control('salesEdit', { recordId, fieldName: field, value, changedBy, deliver })
+    note(`salesforce edit ${field}=${value} by ${changedBy} (${deliver ? 'webhook delivered' : 'webhook DROPPED'})`)
+    refreshSelected()
   }
 
   const sendDuplicate = async () => {
+    if (!recordId) return note('select a record first')
     const payload = {
       eventId: nextEventId(), recordId, objectType: 'Contact', occurredAt: nowIso(),
       changedBy: SALES_ACTOR, changedFields: { phone: '+91DUPLICATE' },
     }
-    const a = await sendWebhook(payload)
-    const b = await sendWebhook(payload) // same eventId again
+    const a = await api.sendWebhook(payload)
+    const b = await api.sendWebhook(payload)
     note(`duplicate test: first=${a.status}, second=${b.status}`)
-    refresh()
+    refreshSelected()
   }
 
   const sendOutOfOrder = async () => {
-    const old = {
+    if (!recordId) return note('select a record first')
+    const res = await api.sendWebhook({
       eventId: nextEventId(), recordId, objectType: 'Contact',
       occurredAt: '2000-01-01T00:00:00.000Z', changedBy: SALES_ACTOR,
       changedFields: { phone: '+91ANCIENT' },
-    }
-    const res = await sendWebhook(old)
+    })
     note(`out-of-order test: historyOnly=${JSON.stringify(res.historyOnlyFields)} (did not overwrite)`)
-    refresh()
+    refreshSelected()
   }
 
   const runBackfill = async () => {
-    const res = await control('backfill')
+    const res = await api.control('backfill')
     note(`backfill: applied=${res.appliedFields} skippedOwn=${res.skippedOwnWrites}`)
-    refresh()
+    refreshSelected()
+    refreshList()
   }
 
   const toggleSalesforce = async () => {
-    const res = await control(metrics.salesforceDown ? 'up' : 'down')
+    const res = await api.control(metrics.salesforceDown ? 'up' : 'down')
     note(`salesforce ${res.salesforceDown ? 'DOWN' : 'UP'}`)
-    refresh()
+    refreshMetrics()
   }
 
   return (
@@ -145,9 +212,8 @@ export default function App() {
       <header>
         <h1>Tequity portal <span className="muted">— two-way sync demo</span></h1>
         <div className="statusbar">
-          <label>Record&nbsp;
-            <input value={recordId} onChange={(e) => setRecordId(e.target.value)} size={10} />
-          </label>
+          <span className="pill">signed in: <strong>{email}</strong></span>
+          <button className="link" onClick={onLogout}>Log out</button>
           <span className={`pill ${metrics.salesforceDown ? 'bad' : 'good'}`}>
             Salesforce {metrics.salesforceDown ? 'DOWN' : 'up'}
           </span>
@@ -158,66 +224,111 @@ export default function App() {
         </div>
       </header>
 
-      <div className="grid">
-        <div className="col">
-          <CurrentState record={record} />
-
-          <div className="card">
-            <h2>Edit in the portal (finance / CS)</h2>
-            <p className="muted">Saves stamp server time + the session actor, then enqueue to Salesforce.</p>
-            {CONTACT_FIELDS.map((f) => (
-              <label key={f} className="row">
-                <span>{f}</span>
-                <input
-                  value={draft[f] ?? ''}
-                  placeholder={record?.fields?.[f]?.value || ''}
-                  onChange={(e) => setDraft({ ...draft, [f]: e.target.value })}
-                />
-              </label>
-            ))}
-            <button className="primary" onClick={saveDraft}>Save edit</button>
-          </div>
-
-          <History history={history} />
-        </div>
-
-        <div className="col">
-          <div className="card cockpit">
-            <h2>Demo cockpit <span className="muted">(drives the fake Salesforce)</span></h2>
-
-            <h3>Outage</h3>
-            <button onClick={toggleSalesforce}>
-              {metrics.salesforceDown ? 'Bring Salesforce UP' : 'Take Salesforce DOWN'}
-            </button>
-            <button onClick={runBackfill}>Run backfill (recover dropped webhooks)</button>
-
-            <h3>Simulate a Salesforce (sales user) edit</h3>
-            <label className="row"><span>field</span>
-              <select value={draft.__sfField || 'phone'}
-                onChange={(e) => setDraft({ ...draft, __sfField: e.target.value })}>
-                {CONTACT_FIELDS.map((f) => <option key={f} value={f}>{f}</option>)}
-              </select>
-            </label>
-            <label className="row"><span>value</span>
-              <input value={draft.__sfValue || ''} placeholder="(random if blank)"
-                onChange={(e) => setDraft({ ...draft, __sfValue: e.target.value })} />
-            </label>
-            <button onClick={() => salesEdit(true)}>Sales edit → deliver webhook</button>
-            <button onClick={() => salesEdit(false)}>Sales edit → DROP webhook (outage loss)</button>
-
-            <h3>Rule probes</h3>
-            <button onClick={sendDuplicate}>Send a duplicate webhook (x2)</button>
-            <button onClick={sendOutOfOrder}>Send an out-of-order (ancient) webhook</button>
-          </div>
-
-          <div className="card">
-            <h2>Activity</h2>
-            <ul className="log">
-              {log.map((l, i) => <li key={i}>{l}</li>)}
+      <div className="layout">
+        <aside className="card sidebar">
+          <h2>Records</h2>
+          {records.length === 0 ? (
+            <p className="muted">None yet — simulate a Salesforce edit to create one.</p>
+          ) : (
+            <ul className="recordlist">
+              {records.map((r) => (
+                <li key={r.recordId}
+                  className={r.recordId === recordId ? 'selected' : ''}
+                  onClick={() => { setRecordId(r.recordId); setDraft({}) }}>
+                  <strong>{r.displayName}</strong>
+                  <span className="muted"> · {r.recordId}</span>
+                </li>
+              ))}
             </ul>
+          )}
+        </aside>
+
+        <div className="grid">
+          <div className="col">
+            <CurrentState record={record} />
+
+            <div className="card">
+              <h2>Edit in the portal</h2>
+              <p className="muted">
+                Saved as <strong>{email}</strong> (from your session) and stamped with server time —
+                then enqueued to Salesforce.
+              </p>
+              {CONTACT_FIELDS.map((f) => (
+                <label key={f} className="row">
+                  <span>{f}</span>
+                  <input
+                    value={draft[f] ?? ''}
+                    placeholder={record?.fields?.[f]?.value || ''}
+                    onChange={(e) => setDraft({ ...draft, [f]: e.target.value })}
+                  />
+                </label>
+              ))}
+              <button className="primary" onClick={save} disabled={!recordId}>Save edit</button>
+            </div>
+
+            <History history={history} />
+          </div>
+
+          <div className="col">
+            <div className="card cockpit">
+              <h2>Demo cockpit <span className="muted">(drives the fake Salesforce)</span></h2>
+
+              <h3>Outage</h3>
+              <button onClick={toggleSalesforce}>
+                {metrics.salesforceDown ? 'Bring Salesforce UP' : 'Take Salesforce DOWN'}
+              </button>
+              <button onClick={runBackfill}>Run backfill (recover dropped webhooks)</button>
+
+              <h3>Simulate a Salesforce (sales user) edit</h3>
+              <label className="row"><span>field</span>
+                <select value={draft.__sfField || 'phone'}
+                  onChange={(e) => setDraft({ ...draft, __sfField: e.target.value })}>
+                  {CONTACT_FIELDS.map((f) => <option key={f} value={f}>{f}</option>)}
+                </select>
+              </label>
+              <label className="row"><span>value</span>
+                <input value={draft.__sfValue || ''} placeholder="(random if blank)"
+                  onChange={(e) => setDraft({ ...draft, __sfValue: e.target.value })} />
+              </label>
+              <label className="row"><span>changed by</span>
+                <input value={draft.__sfChangedBy || ''} placeholder={SALES_ACTOR}
+                  onChange={(e) => setDraft({ ...draft, __sfChangedBy: e.target.value })} />
+              </label>
+              <button onClick={() => salesEdit(true)}>Sales edit → deliver webhook</button>
+              <button onClick={() => salesEdit(false)}>Sales edit → DROP webhook (outage loss)</button>
+
+              <h3>Rule probes</h3>
+              <button onClick={sendDuplicate}>Send a duplicate webhook (x2)</button>
+              <button onClick={sendOutOfOrder}>Send an out-of-order (ancient) webhook</button>
+            </div>
+
+            <div className="card">
+              <h2>Activity</h2>
+              <ul className="log">{log.map((l, i) => <li key={i}>{l}</li>)}</ul>
+            </div>
           </div>
         </div>
       </div>
     </div>
   )
+}
+
+// ---------------------------------------------------------------------------- root
+
+export default function App() {
+  const [email, setEmail] = useState(null)
+  const [ready, setReady] = useState(false)
+
+  useEffect(() => {
+    if (!api.getToken()) { setReady(true); return }
+    // Validate a stored token on load; drop it if the server rejects it.
+    api.me()
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d) setEmail(d.email); else api.setToken(null) })
+      .finally(() => setReady(true))
+  }, [])
+
+  if (!ready) return null
+  if (!email) return <AuthScreen onAuthed={setEmail} />
+  return <Portal email={email} onLogout={() => { api.setToken(null); setEmail(null) }} />
 }

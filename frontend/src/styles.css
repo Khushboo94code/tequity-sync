@@ -46,3 +46,23 @@ button.primary { background: var(--accent); color: #fff; border-color: var(--acc
 .ok { color: var(--good); font-style: normal; }
 .log { list-style: none; margin: 0; padding: 0; font-size: 12px; font-family: ui-monospace, monospace; color: #374151; }
 .log li { padding: 3px 0; border-bottom: 1px dotted var(--line); }
+
+/* auth screen */
+.authwrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
+.authcard { width: 360px; max-width: 100%; display: flex; flex-direction: column; gap: 6px; }
+.authcard h1 { font-size: 22px; margin-bottom: 4px; }
+.authcard .primary { margin-top: 10px; }
+.err { color: var(--bad); font-size: 13px; margin: 4px 0; }
+.link { background: none; border: none; color: var(--accent); cursor: pointer; padding: 6px 0; text-align: left; }
+.link:hover { text-decoration: underline; border: none; }
+
+/* layout with records sidebar */
+.layout { display: flex; gap: 16px; align-items: flex-start; margin-top: 16px; }
+.sidebar { width: 230px; flex: 0 0 230px; }
+.layout .grid { flex: 1; margin-top: 0; }
+@media (max-width: 980px) { .layout { flex-direction: column; } .sidebar { width: 100%; flex: none; } }
+.recordlist { list-style: none; margin: 0; padding: 0; }
+.recordlist li { padding: 8px 10px; border-radius: 8px; cursor: pointer; font-size: 14px; border: 1px solid transparent; }
+.recordlist li:hover { background: var(--bg); }
+.recordlist li.selected { background: #eef2ff; border-color: #c7d2fe; }
+.statusbar strong { font-weight: 600; }
