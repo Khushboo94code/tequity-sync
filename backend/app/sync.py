@@ -169,6 +169,54 @@ def applyInboundWebhook(session, payload: dict) -> dict:
     }
 
 
+def applyPortalEdit(
+    session, recordId: str, objectType: str, editedBy: str, changedFields: dict
+) -> dict:
+    """Apply a portal edit and durably enqueue it for Salesforce (DESIGN.md section 6).
+
+    `ts` is the server save time — our stand-in for the DB commit time (assumption 5) — and
+    `editedBy` is the authenticated session actor. Each field is merged with the SAME rule as
+    the inbound path: a concurrent Salesforce edit with a newer `ts` can still win, in which
+    case the portal write is recorded in history only and is NOT sent onward. Only a winning
+    portal write inserts a durable `outbox` row, in the same transaction that updates state —
+    which is what makes a pending Salesforce call survive a process restart.
+
+    Returns a result dict with the applied/history-only fields, the enqueued outbox ids, and
+    the merged current record.
+    """
+    ts = utcNow()
+    applied, historyOnly, enqueued = [], [], []
+    for fieldName, value in changedFields.items():
+        won = _applyFieldWrite(
+            session, recordId, objectType, fieldName, value, ts,
+            actor=editedBy, source="portal", eventId=None,
+        )
+        if won:
+            applied.append(fieldName)
+            row = Outbox(
+                recordId=recordId,
+                objectType=objectType,
+                fieldName=fieldName,
+                newValue=value,
+                ts=ts,
+                actor=editedBy,
+                status="pending",
+            )
+            session.add(row)
+            session.flush()  # assign row.id
+            enqueued.append(row.id)
+        else:
+            historyOnly.append(fieldName)
+    session.commit()
+    return {
+        "recordId": recordId,
+        "appliedFields": applied,
+        "historyOnlyFields": historyOnly,
+        "enqueuedOutboxIds": enqueued,
+        "record": recordDict(session, recordId),
+    }
+
+
 def recordDict(session, recordId: str) -> dict:
     """Return the current state of a record as {fieldName: {value, ts, actor, source}}."""
     rows = session.execute(
