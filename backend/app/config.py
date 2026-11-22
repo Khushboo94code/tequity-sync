@@ -29,6 +29,9 @@ class Config:
     integrationUser: str = os.environ.get("INTEGRATION_USER", "integration@tequity.example")
     clockSkewSeconds: float = float(os.environ.get("CLOCK_SKEW_SECONDS", "2"))
     sourcePriority: tuple = ("salesforce", "portal")
+    # Seed a few demo contacts on startup so the record list isn't empty. Off by default so tests
+    # stay isolated; the live demo sets SEED_DEMO=1.
+    seedDemo: bool = os.environ.get("SEED_DEMO", "0") == "1"
 
 
 config = Config()

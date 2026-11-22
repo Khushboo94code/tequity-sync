@@ -239,6 +239,29 @@ def getRecord(session, recordId: str) -> dict:
     return {"recordId": recordId, "fields": recordDict(session, recordId)}
 
 
+def listRecords(session) -> list[dict]:
+    """Summaries for the UI's record list: recordId, objectType, and a display name.
+
+    The display name is the record's fullName/name field if set, else the recordId. One row per
+    distinct record (derived from fieldState).
+    """
+    rows = session.execute(
+        select(
+            FieldState.recordId, FieldState.objectType, FieldState.fieldName, FieldState.currentValue
+        )
+    ).all()
+    byRecord: dict[str, dict] = {}
+    for recordId, objectType, fieldName, value in rows:
+        rec = byRecord.setdefault(
+            recordId, {"recordId": recordId, "objectType": objectType, "displayName": None}
+        )
+        if fieldName in ("fullName", "name") and value:
+            rec["displayName"] = value
+    for rec in byRecord.values():
+        rec["displayName"] = rec["displayName"] or rec["recordId"]
+    return sorted(byRecord.values(), key=lambda r: r["recordId"])
+
+
 def getHistory(session, recordId: str) -> list[dict]:
     """Read a record's full append-only history, newest first (for the UI / GET endpoint)."""
     rows = session.execute(

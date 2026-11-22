@@ -39,3 +39,37 @@ def session(makeSession):
         yield s
     finally:
         s.close()
+
+
+@pytest.fixture
+def client(tmp_path, monkeypatch):
+    """A FastAPI TestClient wired to a throwaway database (never touches the dev DB).
+
+    Injects a per-test SQLite engine into app.db / app.main / the worker, so the whole HTTP app
+    (lifespan, auth, worker) runs against an isolated database.
+    """
+    from fastapi.testclient import TestClient
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    import app.db as db
+    import app.main as main
+
+    engine = create_engine(
+        f"sqlite:///{tmp_path}/api.db", connect_args={"check_same_thread": False}, future=True
+    )
+    Sess = sessionmaker(bind=engine, expire_on_commit=False, future=True)
+    monkeypatch.setattr(db, "engine", engine)
+    monkeypatch.setattr(db, "SessionLocal", Sess)
+    monkeypatch.setattr(main, "SessionLocal", Sess)
+    monkeypatch.setattr(main.worker, "makeSession", Sess)
+    with TestClient(main.app) as c:
+        yield c
+
+
+@pytest.fixture
+def authHeaders(client):
+    """Sign up a default portal user and return its Bearer auth header."""
+    res = client.post("/auth/signup", json={"email": "tester@client.example", "password": "pw"})
+    assert res.status_code == 200
+    return {"Authorization": f"Bearer {res.json()['token']}"}
