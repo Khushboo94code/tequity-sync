@@ -63,8 +63,8 @@ function AuthScreen({ onAuthed }) {
         <Brand />
         <h1>{mode === 'login' ? 'Welcome back' : 'Create your account'}</h1>
         <p className="sub muted">
-          Your edits are attributed to you — the actor comes from your authenticated session,
-          resolved server-side.
+          Manage your customer and contact records. Every edit is tracked to you — a clear
+          history of who changed what, and when.
         </p>
         <label className="field"><span>Email</span>
           <input value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="username" />
