@@ -25,7 +25,8 @@ def parseOccurredAt(value: str) -> datetime:
     dt = datetime.fromisoformat(value)
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
+    # Normalise to naive-UTC to match utcNow() and the rest of the stored timestamps.
+    return dt.astimezone(timezone.utc).replace(tzinfo=None)
 
 
 def _applyFieldWrite(

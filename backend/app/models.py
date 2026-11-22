@@ -25,8 +25,13 @@ from .db import Base
 
 
 def utcNow() -> datetime:
-    """Timezone-aware current UTC time. Used for all server-generated timestamps."""
-    return datetime.now(timezone.utc)
+    """Current UTC time as a naive datetime.
+
+    We keep every stored timestamp naive-but-UTC so that SQL comparisons (notably the
+    outbox nextAttemptAt filter) behave identically on SQLite (which drops tzinfo) and
+    Postgres. Python-side comparisons go through rules.asUtc(), which attaches UTC.
+    """
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 # BigInteger on Postgres, Integer on SQLite (SQLite autoincrement needs INTEGER PK).
