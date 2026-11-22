@@ -1,0 +1,10 @@
+[project]
+name = "tequity-sync"
+version = "0.1.0"
+description = "Two-way field-level sync between Salesforce and a Postgres portal (Tequity Round 1)"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-q"
