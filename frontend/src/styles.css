@@ -56,6 +56,16 @@ button.primary { background: var(--accent); color: #fff; border-color: var(--acc
 .link { background: none; border: none; color: var(--accent); cursor: pointer; padding: 6px 0; text-align: left; }
 .link:hover { text-decoration: underline; border: none; }
 
+/* password show/hide */
+.passwordField { position: relative; flex: 1; display: flex; }
+.passwordField input { flex: 1; padding-right: 38px; }
+.eye {
+  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+  margin: 0; padding: 4px; border: none; background: none; color: var(--muted);
+  display: inline-flex; align-items: center; cursor: pointer;
+}
+.eye:hover { color: var(--ink); border: none; background: none; }
+
 /* layout with records sidebar */
 .layout { display: flex; gap: 16px; align-items: flex-start; margin-top: 16px; }
 .sidebar { width: 230px; flex: 0 0 230px; }
