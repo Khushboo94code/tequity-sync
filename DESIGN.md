@@ -356,3 +356,38 @@ integration users (each with its own cap) — a known lever, out of scope to bui
 - **Hardening**: webhook signature verification is stubbed; no rate-limiting of inbound, no authn on
   the portal endpoints beyond a passed actor. Production would add all three.
 - **Rich UI**: the React app is a thin demo cockpit, not the real portal.
+
+---
+
+## Appendix: wiring a real Salesforce org (the next step after this weekend)
+
+The brief requires a **fake CRM** ("call a fake CRM you write yourself") and a demo that runs from a
+fresh checkout with one command. A real org can't satisfy that — it needs OAuth secrets, org-specific
+config, seed data, and a public HTTPS tunnel for inbound, none of which survive `git clone`. So the
+fake is correct for the submission. This appendix records how a real org drops in, because the code
+was built with that seam in place.
+
+**The seam.** The worker depends only on a small CRM interface; `FakeSalesforce` is one implementation,
+a real client is another — the rules never change:
+
+```python
+class CrmClient(Protocol):
+    def upsertRecord(recordId, objectType, fieldName, newValue, actor) -> None: ...
+    def queryChangedSince(sinceTs) -> list[ChangeRow]: ...   # getUpdated + SOQL/Bulk
+```
+
+**Outbound (us → Salesforce).** A connected app + OAuth 2.0 (client-credentials or JWT-bearer) as the
+dedicated **integration user**; call the REST record API (`PATCH /sobjects/{type}/{id}`). Mind the
+Developer-edition daily API cap (~15k/day) — fine for a demo, not a load test.
+
+**Inbound (Salesforce → us).** Salesforce has no generic webhook; pick one:
+- **Change Data Capture** over the Pub/Sub API — closest to our model, 72h replay via Replay IDs;
+  maps cleanly onto our `inbox` + cursor.
+- **Outbound Messages** (flow-triggered SOAP) — simplest to stand up, retries ~24h, but SOAP shape.
+- **Apex trigger + HTTP callout** — most control, most code.
+Any of these needs our endpoint publicly reachable (a tunnel like cloudflared, or a deployment).
+
+**What it would validate that the fake can't:** the real webhook payload shape, real 429/5xx behaviour
+and `Retry-After`, field-level permission errors, and that `changedBy`/`LastModifiedById` actually
+carries our integration user (the loop rule's assumption). That's integration hardening — valuable for
+production, deliberately out of scope here.
