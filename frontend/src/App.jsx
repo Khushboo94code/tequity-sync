@@ -15,6 +15,18 @@ const initials = (s = '') =>
   s.replace(/@.*/, '').split(/[.\s_-]+/).filter(Boolean).slice(0, 2)
     .map((w) => w[0].toUpperCase()).join('') || '?'
 
+// The name part of an email/actor (before @), for compact display; full value kept in a tooltip.
+const shortActor = (a = '') => a.replace(/@.*/, '') || a
+
+function ActorCell({ actor }) {
+  return (
+    <span className="actorcell" title={actor}>
+      <span className="avatar xs">{initials(actor)}</span>
+      <span className="name">{shortActor(actor)}</span>
+    </span>
+  )
+}
+
 const Brand = () => (
   <div className="brand"><span className="logo" /> Tequity <span className="brandsub">Sync</span></div>
 )
@@ -111,7 +123,7 @@ function CurrentState({ record }) {
               <tr key={name}>
                 <td className="fieldname">{name}</td>
                 <td><strong>{fields[name].value}</strong></td>
-                <td>{fields[name].actor}</td>
+                <td><ActorCell actor={fields[name].actor} /></td>
                 <td><span className={`tag tag-${fields[name].source}`}>{fields[name].source}</span></td>
                 <td className="muted">{fields[name].ts?.replace('T', ' ').slice(0, 19)}</td>
               </tr>
@@ -135,7 +147,7 @@ function History({ history }) {
             <li key={i} className={h.appliedCurrent ? 'current' : 'superseded'}>
               <span className={`tag tag-${h.source}`}>{h.source}</span>{' '}
               <strong>{h.fieldName}</strong> = {h.value}{' '}
-              <span className="muted">by {h.actor} · {h.ts?.replace('T', ' ').slice(0, 19)}</span>{' '}
+              <span className="muted">by <span title={h.actor}>{shortActor(h.actor)}</span> · {h.ts?.replace('T', ' ').slice(0, 19)}</span>{' '}
               {h.appliedCurrent ? <em className="ok">current</em> : <em className="muted">superseded</em>}
             </li>
           ))}
