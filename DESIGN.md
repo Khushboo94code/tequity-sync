@@ -21,7 +21,7 @@ Each assumption has a **flip-note**: what changes if the real answer is differen
 | 2 | **Webhooks carry changed fields only** (matches the sample). | If a full record arrives, we diff it against stored state and apply each differing field independently; a naive "treat as full record" would clear unlisted fields. |
 | 3 | **A dedicated Salesforce integration user exists for our outbound writes.** | It is the basis of the loop rule. Without it we fall back to value-equality echo suppression (weaker). |
 | 4 | **Salesforce exposes a `SystemModstamp` changed-since query** (`getUpdated` + SOQL/Bulk API 2.0). | If not, webhooks dropped during an outage are unrecoverable and we need a periodic full-reconciliation sweep. |
-| 5 | **Portal edit order = DB commit timestamp; actor = authenticated session.** | A client-supplied time is spoofable/drifts — a weaker ordering basis. |
+| 5 | **Portal edit order = DB commit timestamp; actor = the authenticated portal session user** (implemented via signup/login — resolved server-side from the session, never from the request body). | A client-supplied time/actor is spoofable → weaker ordering *and* hollow attribution. |
 | 6 | **Same-field conflict = latest timestamp wins + full history; ties broken by a fixed source priority (Salesforce wins ties).** | "One side always wins" is simpler but can override a legitimately-later edit. |
 | 7 | **One service; Postgres is the boundary.** | Two services + a queue add infra the brief doesn't need and make durability something we build, not inherit. |
 
@@ -212,8 +212,9 @@ leaves nothing half-done; Salesforce re-delivery (or our backfill) re-runs it id
 ## 6. The outbound path (portal edit → Salesforce API call)
 
 ```
-PUT /portal/records/{recordId}   body: { objectType, editedBy, changedFields }
-  1. ts := DB commit time (server);  actor := authenticated session user (editedBy).
+PUT /portal/records/{recordId}   body: { objectType, changedFields }   (auth: Bearer token)
+  1. ts := DB commit time (server);  actor := the authenticated session user (resolved from the
+     token server-side — the body carries no actor, so the client cannot assert who it is).
   2. BEGIN TX
      For each (fieldName, value) in changedFields:
        - Apply the SAME merge rule as inbound (section 7) against fieldState with ts.
@@ -239,6 +240,16 @@ sync worker (loop):
 The worker is the **only** place we call Salesforce, so the 100 req/s cap is enforced in exactly one
 token bucket — including retries. Salesforce will emit a webhook for our write; the inbound loop rule
 (section 9) drops it.
+
+**Actor provenance (who changed it).** "Who changed X" is only trustworthy if the actor comes from an
+authenticated source, never from client free-text. Each origin has one: a **portal edit** → the
+authenticated portal session user (the portal has its own login — implemented here as signup/login —
+and the server resolves the actor from the session token, ignoring anything in the body); a
+**Salesforce webhook** → its `changedBy`; **our outbound write** → the integration user (Salesforce
+records it as `LastModifiedById`); **backfill** → that same `LastModifiedById`. Every current value's
+actor is backed by a `fieldHistory` row (actor, ts, source), so the audit is defensible. If the portal
+had *no* auth, portal-side "who" would be unknowable and we'd have to record a service principal and
+say so — which is why we added portal login rather than trust a client-supplied name.
 
 ---
 
@@ -348,7 +359,9 @@ integration users (each with its own cap) — a known lever, out of scope to bui
 ## 12. What we are leaving out of this weekend
 
 - **Deletes** (the brief excludes them) — our model is upsert/append only.
-- **Salesforce auth/login screens** and real OAuth — the integration user is assumed/configured.
+- **Salesforce-side auth** (the integration user's OAuth) is assumed/configured. *Portal*
+  authentication (signup/login) **is** implemented so portal edits carry a real session actor;
+  hardening it (password policy, token expiry, SSO/IdP, httpOnly cookies) is out of scope.
 - **The one-time 5M initial backfill** — same cursor/Bulk mechanism as outage recovery; we describe it,
   we don't run it.
 - **A second region / HA topology**, and any load test against real Salesforce (we use a fake CRM).

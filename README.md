@@ -46,12 +46,15 @@ docker compose up --build        # Postgres + backend (fake Salesforce runs in-p
 cd frontend && npm install && npm run dev   # UI on :5173, proxies the API to :8000
 ```
 
-Open http://localhost:5173. Left panel is the portal (current record, a field-level edit form, the
-history timeline). Right panel is a **demo cockpit** that drives the fake Salesforce so you can trigger
-every rule live: take Salesforce down/up, run backfill, simulate a sales edit with its webhook
-delivered or **dropped**, and fire duplicate / out-of-order probes. The status bar shows the outbox
-depth and oldest-pending age (the watch metrics). `SALESFORCE_RATE_CAP` is set low (5/s) in compose so
-the drain is visibly paced.
+Open http://localhost:5173 and **sign up** (any email + password) — the portal requires login so each
+edit is attributed to a real authenticated user (the actor is derived from the session, server-side).
+A left sidebar lists records; pick one to view/edit. The centre panel is the portal (current record, a
+field-level edit form saved as *you*, the history timeline). The right panel is a **demo cockpit** that
+drives the fake Salesforce so you can trigger every rule live: take Salesforce down/up, run backfill,
+simulate a sales edit with its webhook delivered or **dropped**, and fire duplicate / out-of-order
+probes. The status bar shows the outbox depth and oldest-pending age (the watch metrics).
+`SALESFORCE_RATE_CAP` is set low (5/s) in compose so the drain is visibly paced, and `SEED_DEMO=1`
+seeds a few contacts so the list isn't empty.
 
 ## Layout
 
@@ -59,7 +62,7 @@ the drain is visibly paced.
 DESIGN.md  WALKTHROUGH.md  docs/            the documents
 docker-compose.yml                          Postgres + backend
 backend/
-  app/        config, db, models, rules, sync, worker, ratelimit, fakeSalesforce, backfill, main
+  app/        config, db, models, rules, sync, worker, ratelimit, fakeSalesforce, backfill, auth, main
   tests/      pytest per flow (rules, inbound, outbound, worker, backfill, api)
   scripts/    demo.py (the four-rule demo)
 frontend/     Vite + React portal + cockpit
@@ -78,6 +81,10 @@ frontend/     Vite + React portal + cockpit
 2. **A minimal React UI**, though the brief lists a visual UI as out of scope — to make the rules
    observable in a live demo.
 3. **camelCase everywhere** (incl. Python), deviating from PEP8.
+4. **Portal signup/login** (a further UI extension) — added to make the edit actor a *real*
+   authenticated identity, resolving an attribution concern: "who changed it" should not be a
+   client-supplied string. Demo-grade (PBKDF2 — the same hasher Django defaults to — + opaque DB
+   tokens); hardening (password policy, token expiry, SSO, HTTPS) is out of scope.
 
 The brief mandates a fake CRM; the appendix in `DESIGN.md` records how a real Salesforce Developer org
 would drop into the existing `crm` interface seam later.
