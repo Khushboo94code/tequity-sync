@@ -10,6 +10,15 @@ let eventSeq = 1
 const nextEventId = () => `ui_evt_${eventSeq++}`
 const nowIso = () => new Date().toISOString()
 
+// Up-to-two-letter initials from a name or email, for avatars.
+const initials = (s = '') =>
+  s.replace(/@.*/, '').split(/[.\s_-]+/).filter(Boolean).slice(0, 2)
+    .map((w) => w[0].toUpperCase()).join('') || '?'
+
+const Brand = () => (
+  <div className="brand"><span className="logo" /> Tequity <span className="brandsub">Sync</span></div>
+)
+
 // Eye / eye-off icons for the password show/hide toggle.
 const EyeIcon = (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -51,15 +60,16 @@ function AuthScreen({ onAuthed }) {
   return (
     <div className="authwrap">
       <form className="card authcard" onSubmit={submit}>
-        <h1>Tequity portal</h1>
-        <p className="muted">
-          {mode === 'login' ? 'Log in' : 'Create an account'} — your edits are attributed to you
-          (the actor comes from your authenticated session, server-side).
+        <Brand />
+        <h1>{mode === 'login' ? 'Welcome back' : 'Create your account'}</h1>
+        <p className="sub muted">
+          Your edits are attributed to you — the actor comes from your authenticated session,
+          resolved server-side.
         </p>
-        <label className="row"><span>email</span>
+        <label className="field"><span>Email</span>
           <input value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="username" />
         </label>
-        <label className="row"><span>password</span>
+        <label className="field"><span>Password</span>
           <span className="passwordField">
             <input type={showPassword ? 'text' : 'password'} value={password}
               onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
@@ -88,7 +98,7 @@ function CurrentState({ record }) {
   const names = Object.keys(fields)
   return (
     <div className="card">
-      <h2>Current record — {record?.recordId || '—'}</h2>
+      <h2>Current record · {record?.recordId || '—'}</h2>
       {names.length === 0 ? (
         <p className="muted">No fields yet. Edit below, or simulate a Salesforce change.</p>
       ) : (
@@ -99,7 +109,7 @@ function CurrentState({ record }) {
           <tbody>
             {names.map((name) => (
               <tr key={name}>
-                <td>{name}</td>
+                <td className="fieldname">{name}</td>
                 <td><strong>{fields[name].value}</strong></td>
                 <td>{fields[name].actor}</td>
                 <td><span className={`tag tag-${fields[name].source}`}>{fields[name].source}</span></td>
@@ -116,7 +126,7 @@ function CurrentState({ record }) {
 function History({ history }) {
   return (
     <div className="card">
-      <h2>History (append-only)</h2>
+      <h2>History · append-only</h2>
       {history.length === 0 ? (
         <p className="muted">Nothing yet.</p>
       ) : (
@@ -230,24 +240,26 @@ function Portal({ email, onLogout }) {
     refreshMetrics()
   }
 
+  const lag = metrics.oldestPendingAgeSeconds
   return (
-    <div className="wrap">
-      <header>
-        <h1>Tequity portal <span className="muted">— two-way sync demo</span></h1>
-        <div className="statusbar">
-          <span className="pill">signed in: <strong>{email}</strong></span>
-          <button className="link" onClick={onLogout}>Log out</button>
-          <span className={`pill ${metrics.salesforceDown ? 'bad' : 'good'}`}>
-            Salesforce {metrics.salesforceDown ? 'DOWN' : 'up'}
+    <div className="app">
+      <header className="topbar">
+        <Brand />
+        <div className="toolbar">
+          <span className={`status ${metrics.salesforceDown ? 'down' : 'up'}`}>
+            <i className="dot" /> Salesforce {metrics.salesforceDown ? 'down' : 'up'}
           </span>
-          <span className="pill">outbox pending: {metrics.outboxPending ?? '—'}</span>
-          <span className="pill">oldest pending:&nbsp;
-            {metrics.oldestPendingAgeSeconds == null ? '—' : `${metrics.oldestPendingAgeSeconds.toFixed(1)}s`}
-          </span>
+          <span className="badge">outbox {metrics.outboxPending ?? 0}</span>
+          <span className="badge">lag {lag == null ? '—' : `${lag.toFixed(1)}s`}</span>
+          <div className="userchip">
+            <span className="avatar">{initials(email)}</span>
+            <span className="useremail">{email}</span>
+            <button className="link" onClick={onLogout}>Log out</button>
+          </div>
         </div>
       </header>
 
-      <div className="layout">
+      <main className="layout">
         <aside className="card sidebar">
           <h2>Records</h2>
           {records.length === 0 ? (
@@ -258,26 +270,29 @@ function Portal({ email, onLogout }) {
                 <li key={r.recordId}
                   className={r.recordId === recordId ? 'selected' : ''}
                   onClick={() => { setRecordId(r.recordId); setDraft({}) }}>
-                  <strong>{r.displayName}</strong>
-                  <span className="muted"> · {r.recordId}</span>
+                  <span className="avatar sm">{initials(r.displayName)}</span>
+                  <span className="recmeta">
+                    <strong>{r.displayName}</strong>
+                    <span className="muted">{r.recordId}</span>
+                  </span>
                 </li>
               ))}
             </ul>
           )}
         </aside>
 
-        <div className="grid">
+        <div className="content">
           <div className="col">
             <CurrentState record={record} />
 
             <div className="card">
               <h2>Edit in the portal</h2>
               <p className="muted">
-                Saved as <strong>{email}</strong> (from your session) and stamped with server time —
+                Saved as <strong>{email}</strong> (from your session) and stamped with server time,
                 then enqueued to Salesforce.
               </p>
               {CONTACT_FIELDS.map((f) => (
-                <label key={f} className="row">
+                <label key={f} className="field">
                   <span>{f}</span>
                   <input
                     value={draft[f] ?? ''}
@@ -294,35 +309,35 @@ function Portal({ email, onLogout }) {
 
           <div className="col">
             <div className="card cockpit">
-              <h2>Demo cockpit <span className="muted">(drives the fake Salesforce)</span></h2>
+              <h2>Demo cockpit <span className="muted">· drives the fake Salesforce</span></h2>
 
               <h3>Outage</h3>
               <button onClick={toggleSalesforce}>
                 {metrics.salesforceDown ? 'Bring Salesforce UP' : 'Take Salesforce DOWN'}
               </button>
-              <button onClick={runBackfill}>Run backfill (recover dropped webhooks)</button>
+              <button onClick={runBackfill}>Run backfill</button>
 
               <h3>Simulate a Salesforce (sales user) edit</h3>
-              <label className="row"><span>field</span>
+              <label className="field"><span>field</span>
                 <select value={draft.__sfField || 'phone'}
                   onChange={(e) => setDraft({ ...draft, __sfField: e.target.value })}>
                   {CONTACT_FIELDS.map((f) => <option key={f} value={f}>{f}</option>)}
                 </select>
               </label>
-              <label className="row"><span>value</span>
+              <label className="field"><span>value</span>
                 <input value={draft.__sfValue || ''} placeholder="(random if blank)"
                   onChange={(e) => setDraft({ ...draft, __sfValue: e.target.value })} />
               </label>
-              <label className="row"><span>changed by</span>
+              <label className="field"><span>changed by</span>
                 <input value={draft.__sfChangedBy || ''} placeholder={SALES_ACTOR}
                   onChange={(e) => setDraft({ ...draft, __sfChangedBy: e.target.value })} />
               </label>
               <button onClick={() => salesEdit(true)}>Sales edit → deliver webhook</button>
-              <button onClick={() => salesEdit(false)}>Sales edit → DROP webhook (outage loss)</button>
+              <button onClick={() => salesEdit(false)}>Sales edit → DROP webhook</button>
 
               <h3>Rule probes</h3>
-              <button onClick={sendDuplicate}>Send a duplicate webhook (x2)</button>
-              <button onClick={sendOutOfOrder}>Send an out-of-order (ancient) webhook</button>
+              <button onClick={sendDuplicate}>Duplicate webhook (×2)</button>
+              <button onClick={sendOutOfOrder}>Out-of-order webhook</button>
             </div>
 
             <div className="card">
@@ -331,7 +346,7 @@ function Portal({ email, onLogout }) {
             </div>
           </div>
         </div>
-      </div>
+      </main>
     </div>
   )
 }
@@ -344,7 +359,6 @@ export default function App() {
 
   useEffect(() => {
     if (!api.getToken()) { setReady(true); return }
-    // Validate a stored token on load; drop it if the server rejects it.
     api.me()
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => { if (d) setEmail(d.email); else api.setToken(null) })
