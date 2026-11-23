@@ -13,6 +13,8 @@ earlier value — with who set it and when — is kept in an append-only history
 | [`DESIGN.md`](DESIGN.md) | The formal design — the 12-point outline, the four rules, the outage arithmetic |
 | [`WALKTHROUGH.md`](WALKTHROUGH.md) | The 10-minute presentation script |
 | [`docs/DECISIONS.md`](docs/DECISIONS.md) | The reasoning trail: locked assumptions (with flip-notes) + the Salesforce API research |
+| [`docs/TEST_CASES.md`](docs/TEST_CASES.md) | The manual/live test plan and its recorded run (18/18) |
+| [`docs/CHAT_HISTORY.md`](docs/CHAT_HISTORY.md) | The full AI chat history for this task (redacted) |
 | [`docs/brief.html`](docs/brief.html) | The original brief |
 
 ## The four rules and where each is proven
